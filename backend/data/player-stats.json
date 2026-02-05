@@ -1,0 +1,104 @@
+{
+  "playerStats": [
+    {
+      "id": 1,
+      "name": "LeBron James",
+      "team": "Lakers",
+      "position": "SF",
+      "points": 27.2,
+      "rebounds": 7.5,
+      "assists": 7.3,
+      "games": 56
+    },
+    {
+      "id": 2,
+      "name": "Stephen Curry",
+      "team": "Warriors",
+      "position": "PG",
+      "points": 29.4,
+      "rebounds": 6.1,
+      "assists": 6.3,
+      "games": 56
+    },
+    {
+      "id": 3,
+      "name": "Giannis Antetokounmpo",
+      "team": "Bucks",
+      "position": "PF",
+      "points": 31.1,
+      "rebounds": 11.8,
+      "assists": 5.7,
+      "games": 63
+    },
+    {
+      "id": 4,
+      "name": "Kevin Durant",
+      "team": "Suns",
+      "position": "SF",
+      "points": 28.9,
+      "rebounds": 6.7,
+      "assists": 5.0,
+      "games": 47
+    },
+    {
+      "id": 5,
+      "name": "Luka Doncic",
+      "team": "Mavericks",
+      "position": "PG",
+      "points": 33.5,
+      "rebounds": 8.6,
+      "assists": 8.0,
+      "games": 66
+    },
+    {
+      "id": 6,
+      "name": "Joel Embiid",
+      "team": "76ers",
+      "position": "C",
+      "points": 33.1,
+      "rebounds": 10.2,
+      "assists": 4.2,
+      "games": 66
+    },
+    {
+      "id": 7,
+      "name": "Jayson Tatum",
+      "team": "Celtics",
+      "position": "SF",
+      "points": 30.1,
+      "rebounds": 8.8,
+      "assists": 4.6,
+      "games": 74
+    },
+    {
+      "id": 8,
+      "name": "Nikola Jokic",
+      "team": "Nuggets",
+      "position": "C",
+      "points": 24.5,
+      "rebounds": 11.8,
+      "assists": 9.8,
+      "games": 69
+    },
+    {
+      "id": 9,
+      "name": "Damian Lillard",
+      "team": "Trail Blazers",
+      "position": "PG",
+      "points": 32.2,
+      "rebounds": 4.8,
+      "assists": 7.3,
+      "games": 58
+    },
+    {
+      "id": 10,
+      "name": "Kawhi Leonard",
+      "team": "Clippers",
+      "position": "SF",
+      "points": 23.8,
+      "rebounds": 6.5,
+      "assists": 3.9,
+      "games": 52
+    }
+  ]
+}

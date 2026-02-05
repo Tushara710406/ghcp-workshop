@@ -1,0 +1,94 @@
+{
+  "teams": [
+    {
+      "id": 1,
+      "name": "Lakers",
+      "city": "Los Angeles",
+      "conference": "Western"
+    },
+    {
+      "id": 2,
+      "name": "Celtics",
+      "city": "Boston",
+      "conference": "Eastern"
+    },
+    {
+      "id": 3,
+      "name": "Warriors",
+      "city": "Golden State",
+      "conference": "Western"
+    },
+    {
+      "id": 4,
+      "name": "Heat",
+      "city": "Miami",
+      "conference": "Eastern"
+    },
+    {
+      "id": 5,
+      "name": "Bulls",
+      "city": "Chicago",
+      "conference": "Eastern"
+    },
+    {
+      "id": 6,
+      "name": "Mavericks",
+      "city": "Dallas",
+      "conference": "Western"
+    },
+    {
+      "id": 7,
+      "name": "Nets",
+      "city": "Brooklyn",
+      "conference": "Eastern"
+    },
+    {
+      "id": 8,
+      "name": "Bucks",
+      "city": "Milwaukee",
+      "conference": "Eastern"
+    },
+    {
+      "id": 9,
+      "name": "Suns",
+      "city": "Phoenix",
+      "conference": "Western"
+    },
+    {
+      "id": 10,
+      "name": "76ers",
+      "city": "Philadelphia",
+      "conference": "Eastern"
+    },
+    {
+      "id": 11,
+      "name": "Clippers",
+      "city": "Los Angeles",
+      "conference": "Western"
+    },
+    {
+      "id": 12,
+      "name": "Nuggets",
+      "city": "Denver",
+      "conference": "Western"
+    },
+    {
+      "id": 13,
+      "name": "Raptors",
+      "city": "Toronto",
+      "conference": "Eastern"
+    },
+    {
+      "id": 14,
+      "name": "Jazz",
+      "city": "Utah",
+      "conference": "Western"
+    },
+    {
+      "id": 15,
+      "name": "Trail Blazers",
+      "city": "Portland",
+      "conference": "Western"
+    }
+  ]
+}

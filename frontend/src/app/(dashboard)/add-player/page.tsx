@@ -11,7 +11,7 @@ import {
 import { useState } from "react";
 import { useRouter } from "next/navigation"; // Add router import
 
-const ErrorPageFixing = () => {
+const AddPlayerPage = () => {
   const router = useRouter(); // Initialize router
   const [playerName, setPlayerName] = useState("");
   const [playerPosition, setPlayerPosition] = useState("");
@@ -25,12 +25,15 @@ const ErrorPageFixing = () => {
     setErrorMessage("");
     
     try {
-      // Use backend API URL
+      // Use backend API URL and API key
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+      const apiKey = process.env.NEXT_PUBLIC_API_KEY || 'dev-api-key-12345';
+      
       const response = await fetch(`${apiUrl}/api/players`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-API-Key": apiKey,
         },
         body: JSON.stringify({
           name: playerName,
@@ -40,8 +43,14 @@ const ErrorPageFixing = () => {
       });
 
       if (!response.ok) {
-        if (response.status === 404) {
+        if (response.status === 401) {
+          setErrorMessage(`Error ${response.status}: Unauthorized. API key is required or invalid.`);
+        } else if (response.status === 403) {
+          setErrorMessage(`Error ${response.status}: Forbidden. Invalid API key provided.`);
+        } else if (response.status === 404) {
           setErrorMessage(`Error ${response.status}: API endpoint not found. The /api/players route does not exist.`);
+        } else if (response.status === 429) {
+          setErrorMessage(`Error ${response.status}: Rate limit exceeded. Please try again later.`);
         } else {
           setErrorMessage(`Error ${response.status}: Failed to create player`);
         }
@@ -54,6 +63,7 @@ const ErrorPageFixing = () => {
         setErrorMessage("Player created successfully!");
       }
     } catch (error) {
+      console.log("Network error:", error);
       setErrorMessage("Network error: Failed to connect to the server");
     } finally {
       setIsLoading(false);
@@ -128,4 +138,4 @@ const ErrorPageFixing = () => {
   );
 };
 
-export default ErrorPageFixing;
+export default AddPlayerPage;

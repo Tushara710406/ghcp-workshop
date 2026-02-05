@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { SettingsIcon, UsersIcon } from "lucide-react";
+import { SettingsIcon, UsersIcon, Users2, BarChart3 } from "lucide-react";
 import Link from "next/link";
 import { GoHome, GoHomeFill } from "react-icons/go";
 
@@ -22,14 +22,38 @@ const routes = [
     activeIcon: FaBasketball,
   },
   {
+    label: "Teams",
+    href: "/teams",
+    icon: Users2,
+    activeIcon: Users2,
+  },
+  {
+    label: "Player Stats",
+    href: "/player-stats",
+    icon: BarChart3,
+    activeIcon: BarChart3,
+  },
+  {
+    label: "Stadiums",
+    href: "/stadiums",
+    icon: FaWarehouse,
+    activeIcon: FaWarehouse,
+  },
+  {
     label: "Optimization",
     href: "/optimization",
     icon: SiGithubcopilot,
     activeIcon: SiGithubcopilot,
   },
   {
-    label: "Errors",
-    href: "/errors",
+    label: "Players Info",
+    href: "/players-info",
+    icon: UsersIcon,
+    activeIcon: UsersIcon,
+  },
+  {
+    label: "Add Player",
+    href: "/add-player",
     icon: SettingsIcon,
     activeIcon: SettingsIcon,
   },
@@ -47,7 +71,7 @@ export const Navigation = () => {
             <div
               className={cn(
                 "flex items-center gap-2.5 p-2.5 rounded-md font-medium hover:text-primary transition text-neutral-500",
-                isActive && "bg-white shadow-sm hover:opacity-100 text-primary"
+                isActive && "bg-white shadow-sm hover:opacity-100 text-primary",
               )}
             >
               <Icon className="size-5 text-neutral-500" />

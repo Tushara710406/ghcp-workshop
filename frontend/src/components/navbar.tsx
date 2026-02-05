@@ -1,4 +1,7 @@
+"use client";
+
 import { MobileSidebar } from "./mobile-sidebar";
+import { DarkModeToggle } from "./dark-mode-toggle";
 
 export const Navbar = () => {
   return (
@@ -12,7 +15,10 @@ export const Navbar = () => {
           Performance!
         </p>
       </div>
-      <MobileSidebar />
+      <div className="flex items-center gap-2">
+        <DarkModeToggle />
+        <MobileSidebar />
+      </div>
     </nav>
   );
 };

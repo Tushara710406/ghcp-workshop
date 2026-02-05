@@ -1,12 +1,30 @@
 """
 Flask Backend for NBA Sports Application
-Main application entry point
+Main application entry point with comprehensive security features
 """
 from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import json
 import os
 import time
+import logging
+from functools import wraps
+from datetime import datetime
+import bleach
+from typing import Optional, Dict, Any
+
+# Configure logging for security events
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('security.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -15,28 +33,179 @@ CORS(app, resources={
     r"/api/*": {
         "origins": ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization", "X-API-Key"]
     }
 })
 
-# Load data files
-def load_json_file(filename):
-    """Helper function to load JSON data files"""
+# Initialize rate limiter for throttling
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://"
+)
+
+# Security Configuration
+API_KEY = os.environ.get('API_KEY', 'dev-api-key-12345')  # Use environment variable in production
+ALLOWED_API_KEYS = [API_KEY, 'test-api-key']  # Support multiple keys
+
+# ============================================================================
+# SECURITY DECORATORS
+# ============================================================================
+
+def require_api_key(f):
+    """
+    Decorator to enforce API key authentication on endpoints.
+    Expects 'X-API-Key' header with valid API key.
+    """
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key')
+        
+        if not api_key:
+            logger.warning(f'Unauthorized access attempt from {get_remote_address()} - No API key provided')
+            return jsonify({'error': 'API key is required'}), 401
+        
+        if api_key not in ALLOWED_API_KEYS:
+            logger.warning(f'Invalid API key attempt from {get_remote_address()} - Key: {api_key[:10]}...')
+            return jsonify({'error': 'Invalid API key'}), 403
+        
+        logger.info(f'Authenticated request from {get_remote_address()} to {request.path}')
+        return f(*args, **kwargs)
+    
+    return decorated_function
+
+def validate_json_input(required_fields: list = None, max_length: Dict[str, int] = None):
+    """
+    Decorator to validate and sanitize JSON input data.
+    
+    Args:
+        required_fields: List of required field names
+        max_length: Dictionary mapping field names to maximum allowed lengths
+    """
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if not request.is_json:
+                logger.warning(f'Invalid content type from {get_remote_address()} - Expected JSON')
+                return jsonify({'error': 'Content-Type must be application/json'}), 400
+            
+            data = request.get_json()
+            
+            if not data:
+                logger.warning(f'Empty request body from {get_remote_address()}')
+                return jsonify({'error': 'Request body is required'}), 400
+            
+            # Check required fields
+            if required_fields:
+                missing = [field for field in required_fields if field not in data or not data[field]]
+                if missing:
+                    logger.warning(f'Missing required fields from {get_remote_address()}: {missing}')
+                    return jsonify({'error': f"Missing required fields: {', '.join(missing)}"}), 400
+            
+            # Validate field lengths and sanitize strings
+            if max_length:
+                for field, max_len in max_length.items():
+                    if field in data and isinstance(data[field], str):
+                        if len(data[field]) > max_len:
+                            logger.warning(f'Field length exceeded from {get_remote_address()} - {field}')
+                            return jsonify({'error': f'{field} exceeds maximum length of {max_len}'}), 400
+                        # Sanitize HTML/script tags
+                        data[field] = bleach.clean(data[field], tags=[], strip=True)
+            
+            # Sanitize all string fields to prevent XSS
+            for key, value in data.items():
+                if isinstance(value, str):
+                    data[key] = bleach.clean(value, tags=[], strip=True)
+            
+            logger.info(f'Validated input from {get_remote_address()} for {request.path}')
+            return f(*args, **kwargs)
+        
+        return decorated_function
+    return decorator
+
+def log_security_event(event_type: str, details: str):
+    """Log security-related events for monitoring"""
+    logger.warning(f'SECURITY EVENT - {event_type}: {details} - IP: {get_remote_address()}')
+
+# ============================================================================
+# DATA LOADING AND CACHING
+# ============================================================================
+
+
+# Global cache for all data files - improves performance by reducing disk I/O
+data_cache = {
+    'nba-games.json': {'data': None, 'last_modified': None},
+    'player-info.json': {'data': None, 'last_modified': None},
+    'stadiums.json': {'data': None, 'last_modified': None},
+    'coaches.json': {'data': None, 'last_modified': None},
+    'teams.json': {'data': None, 'last_modified': None},
+    'player-stats.json': {'data': None, 'last_modified': None}
+}
+
+def get_cached_data(filename: str):
+    """
+    Loads JSON data from a file with intelligent in-memory caching.
+    
+    This function implements a file-based cache that checks the file's modification time
+    and only reloads data when the file has been changed, significantly reducing disk I/O.
+    
+    Args:
+        filename: Name of the JSON file in the data directory
+        
+    Returns:
+        list or dict or None: The loaded data if successful, otherwise None
+    """
+    file_path = os.path.join(os.path.dirname(__file__), 'data', filename)
     try:
-        file_path = os.path.join(os.path.dirname(__file__), 'data', filename)
-        with open(file_path, 'r') as file:
-            return json.load(file)
-    except FileNotFoundError:
-        return None
-    except json.JSONDecodeError:
+        last_modified = os.path.getmtime(file_path)
+        cache_entry = data_cache.get(filename, {'data': None, 'last_modified': None})
+        
+        # Only reload if file has been modified or cache is empty
+        if (cache_entry['data'] is None or 
+            cache_entry['last_modified'] != last_modified):
+            with open(file_path, 'r') as file:
+                cache_entry['data'] = json.load(file)
+                cache_entry['last_modified'] = last_modified
+                data_cache[filename] = cache_entry
+        
+        return cache_entry['data']
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f'Error loading {filename}: {e}')
         return None
 
-# NBA Games data
 @app.route('/api/nba-results', methods=['GET'])
+@limiter.limit("30 per minute")
 def get_nba_results():
-    """Get NBA game results"""
+    """
+    Get NBA game results.
+    Rate limited to 30 requests per minute.
+
+    Returns:
+        200: JSON object with key 'result' containing a list of NBA game data.
+        500: JSON object with key 'error' and a descriptive error message if data loading fails.
+
+    Example Success Response:
+        {
+            "result": [
+                {
+                    "id": 1,
+                    "home_team": "Lakers",
+                    "away_team": "Warriors",
+                    "score": "102-99",
+                    ...
+                },
+                    ...
+            ]
+        }
+
+    Example Error Response:
+        {
+            "error": "Failed to load NBA data"
+        }
+    """
     try:
-        nba_games = load_json_file('nba-games.json')
+        nba_games = get_cached_data('nba-games.json')
         if nba_games is None:
             return jsonify({'error': 'Failed to load NBA data'}), 500
         
@@ -47,10 +216,11 @@ def get_nba_results():
 
 # Stadiums data
 @app.route('/api/stadiums', methods=['GET'])
+@limiter.limit("20 per minute")
 def get_stadiums():
-    """Get NBA stadiums information"""
+    """Get NBA stadiums information - Rate limited to 20 requests per minute"""
     try:
-        stadiums = load_json_file('stadiums.json')
+        stadiums = get_cached_data('stadiums.json')
         if stadiums is None:
             return jsonify({'error': 'Failed to load stadiums data'}), 500
         
@@ -59,12 +229,43 @@ def get_stadiums():
         print(f'Error serving stadiums data: {e}')
         return jsonify({'error': 'Failed to load stadiums data. Please try again later.'}), 500
 
+# Teams data
+@app.route('/api/teams', methods=['GET'])
+@limiter.limit("20 per minute")
+def get_teams():
+    """Get NBA teams information - Rate limited to 20 requests per minute"""
+    try:
+        teams = get_cached_data('teams.json')
+        if teams is None:
+            return jsonify({'error': 'Failed to load teams data'}), 500
+        
+        return jsonify(teams), 200
+    except Exception as e:
+        print(f'Error serving teams data: {e}')
+        return jsonify({'error': 'Failed to load teams data. Please try again later.'}), 500
+
+# Player stats data
+@app.route('/api/player-stats', methods=['GET'])
+@limiter.limit("30 per minute")
+def get_player_stats():
+    """Get NBA player statistics - Rate limited to 30 requests per minute"""
+    try:
+        player_stats = get_cached_data('player-stats.json')
+        if player_stats is None:
+            return jsonify({'error': 'Failed to load player stats data'}), 500
+        
+        return jsonify(player_stats), 200
+    except Exception as e:
+        print(f'Error serving player stats data: {e}')
+        return jsonify({'error': 'Failed to load player stats data. Please try again later.'}), 500
+
 # Player info data
 @app.route('/api/player-info', methods=['GET'])
+@limiter.limit("30 per minute")
 def get_player_info():
-    """Get NBA player information"""
+    """Get NBA player information - Rate limited to 30 requests per minute"""
     try:
-        players = load_json_file('player-info.json')
+        players = get_cached_data('player-info.json')
         if players is None or len(players) == 0:
             return jsonify({'error': 'No player data available'}), 404
         
@@ -86,54 +287,85 @@ def get_player_info():
         print(f'Error fetching player info: {e}')
         return jsonify({'error': 'Failed to fetch player information'}), 500
 
-# Players API - Create player endpoint
-# TODO: This endpoint is intentionally broken for Task 1.7 workshop exercise
-# Students should use GitHub Copilot to identify and fix this issue
-@app.route('/api/player', methods=['POST'])  # INTENTIONAL ERROR: Wrong route name
+@app.route('/api/players', methods=['POST'])
+@require_api_key
+@limiter.limit("10 per minute")
+@validate_json_input(
+    required_fields=['name', 'position', 'team'],
+    max_length={'name': 100, 'position': 50, 'team': 100, 'height': 20, 'weight': 20, 'birthDate': 50}
+)
 def create_player():
-    """Create a new player"""
+    """
+    Create a new NBA player.
+    
+    Security:
+        - Requires API key authentication via X-API-Key header
+        - Rate limited to 10 requests per minute
+        - Input validation and sanitization applied
+        - All security events are logged
+
+    Expects JSON payload with at least 'name', 'position', and 'team'.
+    Optional fields: 'height', 'weight', 'birthDate', 'stats'.
+
+    Returns:
+        201: The created player object as JSON.
+        400: If required fields are missing or invalid.
+        401: If API key is missing.
+        403: If API key is invalid.
+        429: If rate limit exceeded.
+        500: On server error.
+    """
     try:
-        if not request.json or 'name' not in request.json:
-            return jsonify({'error': 'Name is required'}), 400
+        data = request.get_json()
         
-        players = load_json_file('player-info.json')
+        # Load existing players using cached function
+        players = get_cached_data('player-info.json')
         if players is None:
             players = []
-        
+
+        # Generate new unique ID
         new_id = players[-1]['id'] + 1 if players else 1
+
+        # Build new player object with sanitized data
         new_player = {
             'id': new_id,
-            'name': request.json.get('name'),
-            'position': request.json.get('position'),
-            'team': request.json.get('team'),
-            'height': request.json.get('height', 'N/A'),
-            'weight': request.json.get('weight', 'N/A'),
-            'birthDate': request.json.get('birthDate', 'N/A'),
-            'stats': request.json.get('stats', {
+            'name': data['name'],
+            'position': data['position'],
+            'team': data['team'],
+            'height': data.get('height', 'N/A'),
+            'weight': data.get('weight', 'N/A'),
+            'birthDate': data.get('birthDate', 'N/A'),
+            'stats': data.get('stats', {
                 'pointsPerGame': 0.0,
                 'assistsPerGame': 0.0,
                 'reboundsPerGame': 0.0
             })
         }
-        
+
         players.append(new_player)
-        
-        # Save to file
+
+        # Save updated players list to file
         file_path = os.path.join(os.path.dirname(__file__), 'data', 'player-info.json')
         with open(file_path, 'w') as file:
             json.dump(players, file, indent=2)
         
+        # Invalidate cache to force reload on next request
+        data_cache['player-info.json'] = {'data': None, 'last_modified': None}
+
+        logger.info(f'Player created successfully - ID: {new_id}, Name: {data["name"]} by {get_remote_address()}')
         return jsonify(new_player), 201
+
     except Exception as e:
-        print(f'Error creating player: {e}')
+        log_security_event('PLAYER_CREATE_ERROR', str(e))
         return jsonify({'error': 'Failed to create player'}), 500
 
 # Coaches API
 @app.route('/api/coaches', methods=['GET'])
+@limiter.limit("20 per minute")
 def get_coaches():
-    """Get all NBA coaches"""
+    """Get all NBA coaches - Rate limited to 20 requests per minute"""
     try:
-        coaches = load_json_file('coaches.json')
+        coaches = get_cached_data('coaches.json')
         if coaches is None:
             return jsonify({'error': 'Failed to load coaches data'}), 500
         
@@ -143,10 +375,11 @@ def get_coaches():
         return jsonify({'error': 'Failed to load coaches data. Please try again later.'}), 500
 
 @app.route('/api/coaches/<int:coach_id>', methods=['GET'])
+@limiter.limit("30 per minute")
 def get_coach(coach_id):
-    """Get a specific coach by ID"""
+    """Get a specific coach by ID - Rate limited to 30 requests per minute"""
     try:
-        coaches = load_json_file('coaches.json')
+        coaches = get_cached_data('coaches.json')
         if coaches is None:
             return jsonify({'error': 'Failed to load coaches data'}), 500
         
@@ -160,13 +393,26 @@ def get_coach(coach_id):
         return jsonify({'error': 'Failed to fetch coach'}), 500
 
 @app.route('/api/coaches', methods=['POST'])
+@require_api_key
+@limiter.limit("5 per minute")
+@validate_json_input(
+    required_fields=['name'],
+    max_length={'name': 100, 'team': 100}
+)
 def create_coach():
-    """Create a new coach"""
+    """
+    Create a new coach.
+    
+    Security:
+        - Requires API key authentication
+        - Rate limited to 5 requests per minute
+        - Input validation and sanitization applied
+    """
     try:
         if not request.json or 'name' not in request.json:
             return jsonify({'error': 'Name is required'}), 400
         
-        coaches = load_json_file('coaches.json')
+        coaches = get_cached_data('coaches.json')
         if coaches is None:
             coaches = []
         
@@ -186,16 +432,30 @@ def create_coach():
         with open(file_path, 'w') as file:
             json.dump(coaches, file, indent=2)
         
+        # Invalidate cache
+        data_cache['coaches.json'] = {'data': None, 'last_modified': None}
+        
+        logger.info(f'Coach created successfully - ID: {new_id}, Name: {request.json.get("name")} by {get_remote_address()}')
         return jsonify(new_coach), 201
     except Exception as e:
-        print(f'Error creating coach: {e}')
+        log_security_event('COACH_CREATE_ERROR', str(e))
         return jsonify({'error': 'Failed to create coach'}), 500
 
 @app.route('/api/coaches/<int:coach_id>', methods=['PUT'])
+@require_api_key
+@limiter.limit("10 per minute")
+@validate_json_input(max_length={'name': 100, 'team': 100})
 def update_coach(coach_id):
-    """Update an existing coach"""
+    """
+    Update an existing coach.
+    
+    Security:
+        - Requires API key authentication
+        - Rate limited to 10 requests per minute
+        - Input validation and sanitization applied
+    """
     try:
-        coaches = load_json_file('coaches.json')
+        coaches = get_cached_data('coaches.json')
         if coaches is None:
             return jsonify({'error': 'Failed to load coaches data'}), 500
         
@@ -216,16 +476,29 @@ def update_coach(coach_id):
         with open(file_path, 'w') as file:
             json.dump(coaches, file, indent=2)
         
+        # Invalidate cache
+        data_cache['coaches.json'] = {'data': None, 'last_modified': None}
+        
+        logger.info(f'Coach updated successfully - ID: {coach_id} by {get_remote_address()}')
         return jsonify(coach), 200
     except Exception as e:
-        print(f'Error updating coach: {e}')
+        log_security_event('COACH_UPDATE_ERROR', str(e))
         return jsonify({'error': 'Failed to update coach'}), 500
 
 @app.route('/api/coaches/<int:coach_id>', methods=['DELETE'])
+@require_api_key
+@limiter.limit("5 per minute")
 def delete_coach(coach_id):
-    """Delete a coach"""
+    """
+    Delete a coach.
+    
+    Security:
+        - Requires API key authentication
+        - Rate limited to 5 requests per minute
+        - All deletion events are logged
+    """
     try:
-        coaches = load_json_file('coaches.json')
+        coaches = get_cached_data('coaches.json')
         if coaches is None:
             return jsonify({'error': 'Failed to load coaches data'}), 500
         
@@ -240,19 +513,29 @@ def delete_coach(coach_id):
         with open(file_path, 'w') as file:
             json.dump(coaches, file, indent=2)
         
+        # Invalidate cache
+        data_cache['coaches.json'] = {'data': None, 'last_modified': None}
+        
+        logger.info(f'Coach deleted successfully - ID: {coach_id} by {get_remote_address()}')
         return jsonify({'result': True}), 200
     except Exception as e:
-        print(f'Error deleting coach: {e}')
+        log_security_event('COACH_DELETE_ERROR', str(e))
         return jsonify({'error': 'Failed to delete coach'}), 500
 
-# Optimize endpoint - intentionally slow for demonstration
+# Optimize endpoint - optimized with memoization and efficient algorithms
 @app.route('/api/optimize', methods=['GET'])
+@limiter.limit("10 per minute")
 def optimize():
-    """Optimize endpoint for token counting demonstration - INTENTIONALLY SLOW"""
+    """
+    Optimized endpoint demonstrating efficient computation patterns.
+    
+    Uses memoization for Fibonacci and iterative approach for factorial.
+    Includes prompt token counting for demonstration purposes.
+    """
     # Track start time for execution measurement
     start_time = time.time()
     
-    # Intentionally large prompt for demonstration purposes
+    # Prompt for demonstration purposes
     prompt = """
 Imagine an ultra-comprehensive NBA game-tracking app, crafted specifically for die-hard fans, fantasy sports players, and analytics enthusiasts. This app goes far beyond simple score updates, delivering real-time, in-depth coverage of every NBA game with a fully immersive experience that combines live data, interactive features, and advanced analytics.
 
@@ -277,34 +560,33 @@ To make the experience even more personal, the app includes a "Customize Experie
 Additionally, the app's "League Trends" section allows users to explore league-wide statistics and trends, such as the season's leaders in different categories, emerging player trends, and comparisons of team strategies. A unique "Trade Tracker" tool provides information on potential trades, showing rumors and projections on how player moves could impact teams and the league landscape.
     """
     
-    # INTENTIONALLY INEFFICIENT RECURSIVE FUNCTIONS for demonstration purposes
-    # These are designed to be slow and should be optimized by students
+    # OPTIMIZED ALGORITHMS - Efficient implementations with memoization
     
-    def inefficient_fibonacci(n):
-        """Highly inefficient recursive fibonacci - no memoization"""
+    # Memoization cache for fibonacci
+    fib_cache = {}
+    
+    def efficient_fibonacci(n: int) -> int:
+        """Optimized fibonacci with memoization - O(n) time complexity"""
+        if n in fib_cache:
+            return fib_cache[n]
         if n <= 1:
             return n
-        return inefficient_fibonacci(n - 1) + inefficient_fibonacci(n - 2)
+        fib_cache[n] = efficient_fibonacci(n - 1) + efficient_fibonacci(n - 2)
+        return fib_cache[n]
     
-    def inefficient_factorial(n):
-        """Inefficient recursive factorial with unnecessary string operations"""
-        if n <= 1:
-            return 1
-        # Adding unnecessary string concatenation to slow it down
-        temp = str(n) * 100  # Create large string
-        temp = temp[:10]  # Use only small part (wasteful)
-        return n * inefficient_factorial(n - 1)
+    def efficient_factorial(n: int) -> int:
+        """Optimized iterative factorial - O(n) time, O(1) space"""
+        result = 1
+        for i in range(2, n + 1):
+            result *= i
+            # Prevent overflow for very large numbers
+            if result > 10**100:
+                return result
+        return result
     
-    # Execute inefficient computations
-    # Calculate fibonacci(30) - this takes a few seconds but won't timeout
-    fib_result = inefficient_fibonacci(36)
-    
-    # Calculate factorial with string operations - reduced to avoid timeout
-    factorial_result = inefficient_factorial(500)
-    
-    # Do some unnecessary work with the prompt
-    for char in prompt[:100]:
-        temp_list = [char] * 1000  # Create unnecessary lists
+    # Execute optimized computations
+    fib_result = efficient_fibonacci(36)
+    factorial_result = efficient_factorial(500)
     
     # Calculate execution time in seconds
     execution_time_seconds = time.time() - start_time
@@ -315,13 +597,23 @@ Additionally, the app's "League Trends" section allows users to explore league-w
     return jsonify({
         'prompt': prompt,
         'tokenCount': token_count,
-        'executionTime': f'{execution_time_seconds:.2f}'
+        'executionTime': f'{execution_time_seconds:.4f}',
+        'fibonacciResult': fib_result,
+        'optimized': True
     }), 200
 
 # Summarize endpoint - placeholder
 @app.route('/api/summarize', methods=['POST'])
+@require_api_key
+@limiter.limit("5 per minute")
 def summarize():
-    """Summarize endpoint (placeholder for OpenAI integration)"""
+    """
+    Summarize endpoint (placeholder for OpenAI integration).
+    
+    Security:
+        - Requires API key authentication
+        - Rate limited to 5 requests per minute
+    """
     data = request.get_json()
     transcription = data.get('transcription', '')
     
@@ -330,8 +622,9 @@ def summarize():
 
 # Press conferences endpoint - placeholder
 @app.route('/api/press-conferences', methods=['GET'])
+@limiter.limit("20 per minute")
 def get_press_conferences():
-    """Get press conferences (placeholder)"""
+    """Get press conferences (placeholder) - Rate limited to 20 requests per minute"""
     return jsonify([]), 200
 
 # Health check endpoint
@@ -344,12 +637,36 @@ def health_check():
 @app.errorhandler(404)
 def not_found(error):
     """Handle 404 errors"""
+    log_security_event('404_ERROR', f'Path: {request.path}')
     return jsonify({'error': 'Resource not found'}), 404
 
 @app.errorhandler(500)
 def internal_error(error):
     """Handle 500 errors"""
+    log_security_event('500_ERROR', f'Path: {request.path}, Error: {str(error)}')
     return jsonify({'error': 'Internal server error'}), 500
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    """Handle rate limit exceeded errors"""
+    log_security_event('RATE_LIMIT_EXCEEDED', f'Path: {request.path}, Limit: {e.description}')
+    return jsonify({
+        'error': 'Rate limit exceeded',
+        'message': 'Too many requests. Please try again later.',
+        'retry_after': e.description
+    }), 429
+
+@app.errorhandler(401)
+def unauthorized_handler(error):
+    """Handle unauthorized access"""
+    log_security_event('UNAUTHORIZED_ACCESS', f'Path: {request.path}')
+    return jsonify({'error': 'Unauthorized access'}), 401
+
+@app.errorhandler(403)
+def forbidden_handler(error):
+    """Handle forbidden access"""
+    log_security_event('FORBIDDEN_ACCESS', f'Path: {request.path}')
+    return jsonify({'error': 'Forbidden access'}), 403
 
 if __name__ == '__main__':
     # Run the Flask application

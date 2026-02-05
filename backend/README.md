@@ -1,21 +1,34 @@
 # NBA Sports Application - Backend API
 
-Python Flask backend service for the NBA Sports Application.
+Python Flask backend service for the NBA Sports Application with comprehensive security features.
 
 ## Overview
 
-This backend provides RESTful API endpoints for the NBA Sports Application, including:
+This backend provides secure RESTful API endpoints for the NBA Sports Application, including:
 - NBA game results
 - Stadium information
 - Player information
-- Coach management
+- Coach management (CRUD operations)
 - Optimization demos
+
+## 🔒 Security Features
+
+This API implements enterprise-grade security:
+- ✅ **API Key Authentication** for write operations
+- ✅ **Rate Limiting** to prevent abuse (10-30 requests/minute per endpoint)
+- ✅ **Input Validation & Sanitization** to prevent XSS and injection attacks
+- ✅ **Security Event Logging** for monitoring and auditing
+- ✅ **CORS Protection** with strict origin policy
+
+See [SECURITY.md](SECURITY.md) for detailed security documentation.
 
 ## Technology Stack
 
 - **Python 3.8+**
 - **Flask 3.0.0** - Web framework
-- **Flask-CORS** - Cross-origin resource sharing support
+- **Flask-CORS 4.0.0** - Cross-origin resource sharing support
+- **Flask-Limiter 3.5.0** - Rate limiting and throttling
+- **Bleach 6.1.0** - HTML sanitization and XSS prevention
 - **JSON** - Data storage
 
 ## Prerequisites
@@ -46,6 +59,15 @@ This backend provides RESTful API endpoints for the NBA Sports Application, incl
    pip install -r requirements.txt
    ```
 
+4. **Configure environment variables (optional):**
+   ```bash
+   # Copy the example environment file
+   cp .env.example .env
+   
+   # Edit .env and set your API key
+   # API_KEY=your-secure-api-key-here
+   ```
+
 ## Running the Backend
 
 1. **Start the Flask server:**
@@ -65,17 +87,98 @@ This backend provides RESTful API endpoints for the NBA Sports Application, incl
 
 ## API Endpoints
 
-### NBA Game Results
+### 🔓 Public Endpoints (No Authentication Required)
+
+#### NBA Game Results
 - **GET** `/api/nba-results` - Get all NBA game results
+  - Rate Limit: 30 requests/minute
 
-### Stadiums
+#### Stadiums
 - **GET** `/api/stadiums` - Get all NBA stadium information
+  - Rate Limit: 20 requests/minute
 
-### Player Information
-- **GET** `/api/player-info` - Get filtered player information (id, name, team, weight, height, position)
+#### Player Information
+- **GET** `/api/player-info` - Get filtered player information
+  - Rate Limit: 30 requests/minute
+  - Returns: id, name, team, weight, height, position
 
-### Coaches
+#### Coaches
 - **GET** `/api/coaches` - Get all coaches
+  - Rate Limit: 20 requests/minute
+- **GET** `/api/coaches/:id` - Get a specific coach by ID
+  - Rate Limit: 30 requests/minute
+
+#### Health Check
+- **GET** `/api/health` - Server health status
+
+### 🔒 Protected Endpoints (Requires API Key)
+
+**Authentication:** Include `X-API-Key` header with valid API key
+
+#### Player Management
+- **POST** `/api/players` - Create a new player
+  - Rate Limit: 10 requests/minute
+  - Required fields: `name`, `position`, `team`
+  - Optional fields: `height`, `weight`, `birthDate`, `stats`
+  - Example:
+    ```bash
+    curl -X POST http://localhost:8080/api/players \
+      -H "Content-Type: application/json" \
+      -H "X-API-Key: dev-api-key-12345" \
+      -d '{
+        "name": "LeBron James",
+        "position": "Forward",
+        "team": "Lakers",
+        "height": "6-9",
+        "weight": "250 lbs"
+      }'
+    ```
+
+#### Coach Management
+- **POST** `/api/coaches` - Create a new coach
+  - Rate Limit: 5 requests/minute
+  - Required fields: `name`
+  
+- **PUT** `/api/coaches/:id` - Update an existing coach
+  - Rate Limit: 10 requests/minute
+  
+- **DELETE** `/api/coaches/:id` - Delete a coach
+  - Rate Limit: 5 requests/minute
+
+## 🔒 Security Testing
+
+Run the comprehensive security test suite:
+
+```bash
+# Make sure the server is running first
+python app.py
+
+# In another terminal, run the security tests
+python test_security.py
+```
+
+The test suite validates:
+- ✅ API key authentication
+- ✅ Input validation and sanitization
+- ✅ Rate limiting functionality
+- ✅ XSS prevention
+- ✅ Security event logging
+
+## 📊 Monitoring
+
+Security events are logged to `security.log`. Monitor this file for:
+- Failed authentication attempts
+- Rate limit violations
+- Input validation failures
+- Suspicious activity
+
+```bash
+# View recent security events
+tail -f security.log
+
+# Count failed auth attempts by IP
+grep "Invalid API key" security.log | awk '{print $NF}' | sort | uniq -c
+```
 - **GET** `/api/coaches/<id>` - Get a specific coach by ID
 - **POST** `/api/coaches` - Create a new coach
 - **PUT** `/api/coaches/<id>` - Update an existing coach

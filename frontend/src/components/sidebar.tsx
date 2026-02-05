@@ -5,7 +5,7 @@ import { Navigation } from "./navigation";
 
 export const Sidebar = () => {
   return (
-    <aside className="h-full bg-neutral-100 p-4 w-full">
+    <aside className="h-full bg-neutral-100 dark:bg-neutral-900 p-4 w-full border-r dark:border-neutral-800">
       <Link href="/" className="flex items-center gap-1.5">
         <Image src="/basketball-logo.svg" alt="logo" width={32} height={32} />{" "}
         <br />{" "}
